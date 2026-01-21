@@ -5,10 +5,10 @@ type Landmark = {
   x: number;
   y: number;
   z: number;
-}
+};
 
 export interface IScan extends Document {
-  userId: mongoose.Types.ObjectId;
+  userId: string;
   landmarks: Landmark[];
   scores: Scores;
   scanDate: Date;
@@ -18,8 +18,7 @@ export interface IScan extends Document {
 const ScanSchema: Schema = new Schema(
   {
     userId: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
+      type: String,
       required: true,
       index: true,
     },
@@ -53,10 +52,9 @@ const ScanSchema: Schema = new Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Index for querying user scans by date
-ScanSchema.index({ userId: 1, scanDate: -1 });
+ScanSchema.index({ userId: 1, scanDate: -1 }, { unique: true });
 
 export const Scan = mongoose.model<IScan>('Scan', ScanSchema);

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { type IDailyRoutine, Plan } from '../models/Plan.model';
-import { Scan } from '../models/Scan.model';
+import { type IDailyRoutine, Plan } from '../models/Plan';
+import { Scan } from '../models/Scan';
 import { type RoutineId, type Scores } from '../types';
 import {
   type FactorKey,
@@ -26,7 +26,7 @@ interface CandidateRoutine {
 const calculateDistance = (
   factor: FactorKey,
   score: number,
-  goal: number
+  goal: number,
 ): number => {
   if (factor === 'facialPuffiness') {
     return Math.max(0, score - goal);
@@ -45,7 +45,7 @@ const calculateDistance = (
  */
 const selectWeightedRoutines = (
   scores: Scores,
-  maxDaily: number = 7
+  maxDaily: number = 7,
 ): { daily: RoutineId[]; bonus: RoutineId[] } => {
   const candidates: CandidateRoutine[] = [];
 
@@ -101,8 +101,8 @@ const selectWeightedRoutines = (
  * Generate a weekly plan from a scan
  */
 export const generatePlanFromScan = async (
-  userId: mongoose.Types.ObjectId,
-  scanId: mongoose.Types.ObjectId
+  userId: string,
+  scanId: string,
 ): Promise<typeof Plan.prototype> => {
   // Fetch the scan
   const scan = await Scan.findById(scanId);
@@ -154,7 +154,7 @@ export const generatePlanFromScan = async (
  * Get the current active plan for a user
  */
 export const getCurrentPlan = async (
-  userId: mongoose.Types.ObjectId
+  userId: string,
 ): Promise<typeof Plan.prototype | null> => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -174,9 +174,9 @@ export const getCurrentPlan = async (
  * Preserves completion status for completed routines.
  */
 export const updatePlanFromScan = async (
-  userId: mongoose.Types.ObjectId,
+  userId: string,
   planId: mongoose.Types.ObjectId,
-  scanId: mongoose.Types.ObjectId
+  scanId: mongoose.Types.ObjectId,
 ): Promise<typeof Plan.prototype> => {
   // Fetch the existing plan
   const existingPlan = await Plan.findOne({ _id: planId, userId });

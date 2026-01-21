@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Types } from 'mongoose';
 import type { RoutineId } from '../types';
 
 export interface IDailyRoutine {
@@ -9,8 +9,8 @@ export interface IDailyRoutine {
 }
 
 export interface IPlan extends Document {
-  userId: mongoose.Types.ObjectId;
-  scanId: mongoose.Types.ObjectId;
+  userId: string;
+  scanId: Types.ObjectId;
   startDate: Date;
   endDate: Date;
   dailyRoutines: IDailyRoutine[];
@@ -28,13 +28,12 @@ const DailyRoutineSchema = new Schema({
 const PlanSchema: Schema = new Schema(
   {
     userId: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
+      type: String,
       required: true,
       index: true,
     },
     scanId: {
-      type: Schema.Types.ObjectId,
+      type: Types.ObjectId,
       ref: 'Scan',
       required: true,
     },
@@ -51,10 +50,9 @@ const PlanSchema: Schema = new Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Index for finding active plans
 PlanSchema.index({ userId: 1, startDate: -1 });
 PlanSchema.index({ userId: 1, endDate: 1 });
 

@@ -1,15 +1,18 @@
-import express, { Response } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
-import { Scan } from '../models/Scan.model';
-import { AuthRequest } from '../types';
+import { getAuth, requireAuth } from '@clerk/express';
+import express from 'express';
+import { Scan } from '../models/Scan';
 
 const router = express.Router();
 
 // POST /api/scans - Create a new scan
-router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/', requireAuth(), async (req, res) => {
   try {
     const { landmarks, scores } = req.body;
-    const userId = (req as any).userId;
+    const { userId } = getAuth(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     if (!landmarks || !scores) {
       return res.status(400).json({ error: 'Missing landmarks or scores' });
@@ -37,9 +40,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/scans - Get user's scan history
-router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth(), async (req, res) => {
   try {
-    const userId = (req as any).userId;
+    const { userId } = getAuth(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const scans = await Scan.find({ userId })
       .sort({ scanDate: -1 })
@@ -54,10 +61,14 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/scans/:id - Get specific scan
-router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/:id', requireAuth(), async (req, res) => {
   try {
-    const userId = (req as any).userId;
+    const { userId } = getAuth(req);
     const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const scan = await Scan.findOne({ _id: id, userId });
 

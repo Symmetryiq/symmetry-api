@@ -4,14 +4,12 @@ import express from 'express';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
 import morgan from 'morgan';
-import { initializeFirebase } from './src/utils/firebase';
 
 // Import routes
-import checklistRoutes from './src/routes/checklist.routes';
-import notificationRoutes from './src/routes/notification.routes';
-import planRoutes from './src/routes/plan.routes';
-import scanRoutes from './src/routes/scan.routes';
-import userRoutes from './src/routes/user.routes';
+import checklistRoutes from './src/routes/checklist';
+import planRoutes from './src/routes/plan';
+import scanRoutes from './src/routes/scan';
+import userRoutes from './src/routes/user';
 
 const app = express();
 
@@ -20,17 +18,6 @@ app.use(helmet());
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
-
-// Initialize Firebase Admin SDK (once)
-let firebaseInitialized = false;
-if (!firebaseInitialized) {
-  try {
-    initializeFirebase();
-    firebaseInitialized = true;
-  } catch (error) {
-    console.error('Failed to initialize Firebase:', error);
-  }
-}
 
 // MongoDB connection with pooling for serverless
 let isConnected = false;
@@ -87,7 +74,6 @@ app.get('/', (req, res) => {
 app.use('/api/scans', scanRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/checklist', checklistRoutes);
-app.use('/api/notifications', notificationRoutes);
 app.use('/api/user', userRoutes);
 
 // Error handling
@@ -96,11 +82,11 @@ app.use(
     err: any,
     req: express.Request,
     res: express.Response,
-    next: express.NextFunction
+    next: express.NextFunction,
   ) => {
     console.error('Error:', err);
     res.status(500).json({ error: 'Internal server error' });
-  }
+  },
 );
 
 // Export for Vercel

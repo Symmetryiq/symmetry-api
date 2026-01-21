@@ -1,26 +1,24 @@
-import express, { type Response } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
-import { ChecklistEntry } from '../models/ChecklistEntry.model';
-import type { AuthRequest } from '../types';
+import { getAuth, requireAuth } from '@clerk/express';
+import express from 'express';
+import { Checklist } from '../models/Checklist';
 import { CHECKLIST_TASKS } from '../utils/constants';
 
 const router = express.Router();
 
 // POST /api/checklist - Create or update checklist for a date
-router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/', requireAuth(), async (req, res) => {
   try {
-    const userId = (req as any).userId;
-    const { date, tasks } = req.body; // date should be YYYY-MM-DD
+    const { userId } = getAuth(req);
+    const { date, tasks } = req.body;
 
     if (!date || !tasks) {
       return res.status(400).json({ error: 'Missing date or tasks' });
     }
 
-    // Upsert checklist entry
-    const checklist = await ChecklistEntry.findOneAndUpdate(
+    const checklist = await Checklist.findOneAndUpdate(
       { userId, date },
       { tasks },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     res.json({
@@ -34,14 +32,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/checklist/:date - Get checklist for a specific date
-router.get('/:date', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/:date', requireAuth(), async (req, res) => {
   try {
-    const userId = (req as any).userId;
+    const { userId } = getAuth(req);
     const { date } = req.params;
 
-    let checklist = await ChecklistEntry.findOne({ userId, date });
+    let checklist = await Checklist.findOne({ userId, date });
 
-    // If no checklist exists, return default tasks
     if (!checklist) {
       return res.json({
         checklist: {
