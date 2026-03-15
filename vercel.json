@@ -14,11 +14,5 @@
       "src": "/(.*)",
       "dest": "/index.ts"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/notifications/cron/daily-reminder",
-      "schedule": "0 8 * * *"
-    }
   ]
 }

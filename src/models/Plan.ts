@@ -1,29 +1,23 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 import type { RoutineId } from '../types';
 
-export interface IDailyRoutine {
-  date: Date;
-  routineId: RoutineId;
-  completed: boolean;
-  completedAt?: Date;
-}
-
 export interface IPlan extends Document {
   userId: string;
   scanId: Types.ObjectId;
+  status: 'active' | 'completed' | 'replaced';
   startDate: Date;
   endDate: Date;
-  dailyRoutines: IDailyRoutine[];
+  durationDays: number;
+  
+  // The predefined schedule (what the user SHOULD do on which day)
+  // E.g., Record<"day-1", ["routine-id-1", "routine-id-2"]>
+  schedule: Map<string, string[]>;
+  
+  // Any bonus routines assigned to this plan pool
   bonusRoutines: RoutineId[];
+  
   createdAt: Date;
 }
-
-const DailyRoutineSchema = new Schema({
-  date: { type: Date, required: true },
-  routineId: { type: String, required: true },
-  completed: { type: Boolean, default: false },
-  completedAt: { type: Date },
-});
 
 const PlanSchema: Schema = new Schema(
   {
@@ -37,6 +31,12 @@ const PlanSchema: Schema = new Schema(
       ref: 'Scan',
       required: true,
     },
+    status: {
+      type: String,
+      enum: ['active', 'completed', 'replaced'],
+      default: 'active',
+      index: true,
+    },
     startDate: {
       type: Date,
       required: true,
@@ -45,7 +45,16 @@ const PlanSchema: Schema = new Schema(
       type: Date,
       required: true,
     },
-    dailyRoutines: [DailyRoutineSchema],
+    durationDays: {
+      type: Number,
+      default: 28,
+      required: true,
+    },
+    schedule: {
+      type: Map,
+      of: [String],
+      required: true,
+    },
     bonusRoutines: [{ type: String }],
   },
   {
@@ -53,7 +62,7 @@ const PlanSchema: Schema = new Schema(
   },
 );
 
+PlanSchema.index({ userId: 1, status: 1 });
 PlanSchema.index({ userId: 1, startDate: -1 });
-PlanSchema.index({ userId: 1, endDate: 1 });
 
 export const Plan = mongoose.model<IPlan>('Plan', PlanSchema);

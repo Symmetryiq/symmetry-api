@@ -10,12 +10,16 @@ import checklistRoutes from './src/routes/checklist';
 import planRoutes from './src/routes/plan';
 import scanRoutes from './src/routes/scan';
 import userRoutes from './src/routes/user';
+import { errorHandler } from './src/middleware/error-handler';
 
 const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: '*' }));
+app.use(cors({ 
+  origin: '*', // Configure specific origins in production
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 
@@ -76,18 +80,8 @@ app.use('/api/plans', planRoutes);
 app.use('/api/checklist', checklistRoutes);
 app.use('/api/user', userRoutes);
 
-// Error handling
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction,
-  ) => {
-    console.error('Error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  },
-);
+// Centralized error handling
+app.use(errorHandler);
 
 // Export for Vercel
 export default app;

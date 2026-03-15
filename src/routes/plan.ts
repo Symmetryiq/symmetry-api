@@ -1,172 +1,134 @@
 import { getAuth, requireAuth } from '@clerk/express';
 import express from 'express';
+import { z } from 'zod';
 import { Plan } from '../models/Plan';
+import { RoutineLog } from '../models/RoutineLog';
 import { generatePlanFromScan, getCurrentPlan } from '../services/plan.service';
+import { asyncHandler } from '../middleware/async-handler';
+import { validate } from '../middleware/validate';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 
+const generatePlanSchema = z.object({
+  body: z.object({
+    scanId: z.string().refine((val) => mongoose.Types.ObjectId.isValid(val), {
+      message: 'Invalid scanId format',
+    }),
+  }),
+});
+
 // POST /api/plans/generate - Generate a new plan from a scan
-router.post('/generate', requireAuth(), async (req, res) => {
-  try {
+router.post(
+  '/generate',
+  requireAuth(),
+  validate(generatePlanSchema),
+  asyncHandler(async (req, res) => {
     const { userId } = getAuth(req);
     const { scanId } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    if (!scanId) {
-      return res.status(400).json({ error: 'Missing scanId' });
-    }
 
     const plan = await generatePlanFromScan(userId, scanId);
 
     res.status(201).json({
+      success: true,
       message: 'Plan generated successfully',
       plan,
     });
-  } catch (error: any) {
-    console.error('Error generating plan:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate plan' });
-  }
-});
+  })
+);
 
 // GET /api/plans/current - Get current active plan
-router.get('/current', requireAuth(), async (req, res) => {
-  try {
+router.get(
+  '/current',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
     const { userId } = getAuth(req);
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
 
     const plan = await getCurrentPlan(userId);
 
     if (!plan) {
-      return res.status(404).json({ error: 'No active plan found' });
+      return res.status(404).json({ success: false, error: 'No active plan found' });
     }
 
-    res.json({ plan });
-  } catch (error: any) {
-    console.error('Error fetching current plan:', error);
-    res.status(500).json({ error: 'Failed to fetch plan' });
-  }
-});
+    res.json({ success: true, plan });
+  })
+);
 
-// GET /api/plans/:planId/routines/:date - Get routines for a specific date
-router.get('/:planId/routines/:date', requireAuth(), async (req, res) => {
-  try {
+// GET /api/plans/:planId/routines/:date - Get routines and completion status for a specific date
+router.get(
+  '/:planId/routines/:date',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
     const { userId } = getAuth(req);
     const { planId, date } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
 
     const plan = await Plan.findOne({ _id: planId, userId });
 
     if (!plan) {
-      return res.status(404).json({ error: 'Plan not found' });
+      return res.status(404).json({ success: false, error: 'Plan not found' });
     }
 
-    // Parse the date (YYYY-MM-DD)
-    const targetDate = new Date(date as string);
-    targetDate.setHours(0, 0, 0, 0);
+    // Get the assigned routine IDs for this date from the schedule Map
+    const assignedRoutines = plan.schedule.get(date) || [];
 
-    // Find routine for this date
-    const dailyRoutine = plan.dailyRoutines.find((dr) => {
-      const drDate = new Date(dr.date);
-      drDate.setHours(0, 0, 0, 0);
-      return drDate.getTime() === targetDate.getTime();
-    });
+    // Get completion status from RoutineLog
+    const logs = await RoutineLog.find({ userId, planId, date });
+    
+    // Map completed routine IDs
+    const completedRoutineIds = logs.filter(l => l.status === 'completed').map(l => l.routineId);
 
     res.json({
-      dailyRoutine: dailyRoutine || null,
-      bonusRoutines: plan.bonusRoutines,
+      success: true,
+      routines: {
+        assigned: assignedRoutines,
+        completed: completedRoutineIds,
+        bonus: plan.bonusRoutines,
+      }
     });
-  } catch (error: any) {
-    console.error('Error fetching routines:', error);
-    res.status(500).json({ error: 'Failed to fetch routines' });
-  }
+  })
+);
+
+const completeRoutineSchema = z.object({
+  body: z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    durationSeconds: z.number().optional()
+  }),
 });
 
-// PATCH /api/plans/:planId/routines/:routineId/complete - Mark routine as completed
+// PATCH /api/plans/:planId/routines/:routineId/complete - Mark routine as completed via RoutineLog
 router.patch(
   '/:planId/routines/:routineId/complete',
   requireAuth(),
-  async (req, res) => {
-    try {
-      const { userId } = getAuth(req);
-      const { planId, routineId } = req.params;
-      const { date } = req.body;
+  validate(completeRoutineSchema),
+  asyncHandler(async (req, res) => {
+    const { userId } = getAuth(req);
+    const { planId, routineId } = req.params;
+    const { date, durationSeconds } = req.body;
 
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const plan = await Plan.findOne({ _id: planId, userId });
-
-      if (!plan) {
-        return res.status(404).json({ error: 'Plan not found' });
-      }
-
-      let routine;
-
-      if (date) {
-        const targetDate = new Date(date);
-        targetDate.setHours(0, 0, 0, 0);
-
-        routine = plan.dailyRoutines.find((dr) => {
-          const drDate = new Date(dr.date);
-          drDate.setHours(0, 0, 0, 0);
-          return (
-            dr.routineId === routineId &&
-            drDate.getTime() === targetDate.getTime()
-          );
-        });
-      } else {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        routine = plan.dailyRoutines.find((dr) => {
-          const drDate = new Date(dr.date);
-          drDate.setHours(0, 0, 0, 0);
-          return (
-            dr.routineId === routineId && drDate.getTime() === today.getTime()
-          );
-        });
-
-        if (!routine) {
-          routine = plan.dailyRoutines.find(
-            (dr) => dr.routineId === routineId && !dr.completed,
-          );
-        }
-
-        if (!routine) {
-          routine = plan.dailyRoutines.find((dr) => dr.routineId === routineId);
-        }
-      }
-
-      if (!routine) {
-        return res
-          .status(404)
-          .json({ error: 'Routine not found in plan for this date' });
-      }
-
-      routine.completed = true;
-      routine.completedAt = new Date();
-
-      await plan.save();
-
-      res.json({
-        message: 'Routine marked as completed',
-        routine,
-      });
-    } catch (error: any) {
-      console.error('Error completing routine:', error);
-      res.status(500).json({ error: 'Failed to complete routine' });
+    const plan = await Plan.findOne({ _id: planId, userId });
+    if (!plan) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
     }
-  },
+
+    // Upsert the RoutineLog entry
+    const log = await RoutineLog.findOneAndUpdate(
+      { userId, planId, routineId, date },
+      { 
+        $set: { 
+          status: 'completed', 
+          completedAt: new Date(),
+          ...(durationSeconds !== undefined && { durationSeconds }) 
+        } 
+      },
+      { upsert: true, new: true }
+    );
+
+    res.json({
+      success: true,
+      message: 'Routine marked as completed',
+      log,
+    });
+  })
 );
 
 export default router;

@@ -1,5 +1,3 @@
-import { Request } from 'express';
-
 export type RoutineId =
   | 'hard-mewing-hold'
   | 'masseter-balance-training'
@@ -27,12 +25,4 @@ export interface Scores {
   jawlineSymmetry: number;
   cheekboneBalance: number;
   eyebrowSymmetry: number;
-}
-
-export interface AuthRequest extends Request {
-  user?: {
-    uid: string;
-    email?: string;
-  };
-  userId?: any;
 }

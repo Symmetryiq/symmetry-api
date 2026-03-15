@@ -1,230 +1,138 @@
 import mongoose from 'mongoose';
-import { type IDailyRoutine, Plan } from '../models/Plan';
+import { Plan } from '../models/Plan';
 import { Scan } from '../models/Scan';
 import { type RoutineId, type Scores } from '../types';
-import {
-  type FactorKey,
-  GOALS,
-  ROUTINE_FACTOR_MAP,
-  type RoutineMapping,
-} from '../utils/constants';
+import { type FactorKey, GOALS, ROUTINE_FACTOR_MAP, type RoutineMapping } from '../utils/constants';
 
-/**
- * Represents a candidate routine with its computed priority score.
- */
 interface CandidateRoutine {
   routineId: RoutineId;
   factor: FactorKey;
   priority: number;
 }
 
-/**
- * Calculate distance from goal for a factor.
- * For facialPuffiness (lower is better), distance = value - goal
- * For others, distance = goal - value
- */
-const calculateDistance = (
-  factor: FactorKey,
-  score: number,
-  goal: number,
-): number => {
-  if (factor === 'facialPuffiness') {
-    return Math.max(0, score - goal);
-  }
-  return Math.max(0, goal - score);
+const calculateDistance = (factor: FactorKey, score: number, goal: number): number => {
+  return factor === 'facialPuffiness' ? Math.max(0, score - goal) : Math.max(0, goal - score);
 };
 
-/**
- * Select routines using weighted priority algorithm.
- * Priority = distanceFromGoal × routineImpact + small variance
- *
- * This ensures:
- * - Factors further from goal get more attention
- * - Higher-impact routines are prioritized
- * - Small variance prevents identical plans on rescan
- */
-const selectWeightedRoutines = (
-  scores: Scores,
-  maxDaily: number = 7,
-): { daily: RoutineId[]; bonus: RoutineId[] } => {
+const selectWeightedRoutines = (scores: Scores): { primary: RoutineId[], supporting: RoutineId[], bonus: RoutineId[] } => {
   const candidates: CandidateRoutine[] = [];
 
-  // 1. Build candidate list from all factors that need improvement
   for (const [factorKey, goal] of Object.entries(GOALS)) {
     const factor = factorKey as FactorKey;
-    const score = scores[factor];
-
+    const score = scores[factor as keyof Scores];
     if (score === undefined) continue;
 
-    const distance = calculateDistance(factor, score, goal);
-
-    // Only consider factors that need improvement
+    const distance = calculateDistance(factor, score as number, goal);
     if (distance > 0) {
       const mappings: RoutineMapping[] = ROUTINE_FACTOR_MAP[factor];
-
       for (const mapping of mappings) {
-        // Priority = distance × impact + small variance (0-2)
-        const variance = Math.random() * 2;
-        const priority = distance * mapping.impact + variance;
-
-        candidates.push({
-          routineId: mapping.routineId,
-          factor,
-          priority,
-        });
+        // Deterministic rotational variance based on distance
+        const priority = distance * mapping.impact;
+        candidates.push({ routineId: mapping.routineId, factor, priority });
       }
     }
   }
 
-  // 2. Sort by priority (descending) - highest priority first
+  // Sort by priority description
   candidates.sort((a, b) => b.priority - a.priority);
 
-  // 3. Deduplicate and collect routines
-  const allRoutines: RoutineId[] = [];
-  const seenRoutines = new Set<RoutineId>();
+  const uniqueRoutines: RoutineId[] = [];
+  const seen = new Set<RoutineId>();
 
   for (const candidate of candidates) {
-    if (!seenRoutines.has(candidate.routineId)) {
-      allRoutines.push(candidate.routineId);
-      seenRoutines.add(candidate.routineId);
+    if (!seen.has(candidate.routineId)) {
+      uniqueRoutines.push(candidate.routineId);
+      seen.add(candidate.routineId);
     }
   }
 
-  // 4. Split into daily (first N) and bonus (remaining)
-  const daily = allRoutines.slice(0, maxDaily);
-  const bonus = allRoutines.slice(maxDaily);
+  // Split into components for the 28 day schedule
+  // Primary = top 2 routines addressing the worst factors
+  // Supporting = next 4 routines
+  // Bonus = anything else
+  const primary = uniqueRoutines.slice(0, 2);
+  const supporting = uniqueRoutines.slice(2, 6);
+  const bonus = uniqueRoutines.slice(6);
+  
+  // Flash fallbacks if not enough routines
+  if (primary.length === 0) primary.push('mewing-basics', 'correct-swallowing');
+  if (supporting.length === 0) supporting.push('jaw-massage-1', 'facial-yoga-1');
 
-  return { daily, bonus };
+  return { primary, supporting, bonus };
 };
 
-/**
- * Generate a weekly plan from a scan
- */
-export const generatePlanFromScan = async (
-  userId: string,
-  scanId: string,
-): Promise<typeof Plan.prototype> => {
-  // Fetch the scan
+export const generatePlanFromScan = async (userId: string, scanId: string): Promise<typeof Plan.prototype> => {
   const scan = await Scan.findById(scanId);
+  if (!scan) throw new Error('Scan not found');
+  if (scan.userId !== userId) throw new Error('Unauthorized');
 
-  if (!scan) {
-    throw new Error('Scan not found');
-  }
+  const { primary, supporting, bonus } = selectWeightedRoutines(scan.scores as unknown as Scores);
 
-  if (scan.userId.toString() !== userId.toString()) {
-    throw new Error('Unauthorized');
-  }
-
-  // Select routines using weighted algorithm
-  const { daily, bonus } = selectWeightedRoutines(scan.scores);
-
-  // Create 7-day plan starting from today
   const startDate = new Date();
   startDate.setHours(0, 0, 0, 0);
 
   const endDate = new Date(startDate);
-  endDate.setDate(endDate.getDate() + 6); // 7 days total
+  endDate.setDate(endDate.getDate() + 27); // 28 days total
 
-  // Create daily routine entries
-  const dailyRoutines: IDailyRoutine[] = daily.map((routineId, index) => {
-    const routineDate = new Date(startDate);
-    routineDate.setDate(routineDate.getDate() + index);
+  const schedule = new Map<string, string[]>();
 
-    return {
-      date: routineDate,
-      routineId,
-      completed: false,
-    };
-  });
+  // Generate 28-day schedule
+  for (let dayOffset = 0; dayOffset < 28; dayOffset++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + dayOffset);
+    const dateStr = d.toISOString().split('T')[0]; // YYYY-MM-DD
 
-  // Create the plan
+    const dayOfWeek = (dayOffset % 7) + 1; // 1 to 7
+
+    // Day 7 is always rest
+    if (dayOfWeek === 7) {
+      schedule.set(dateStr, []);
+      continue;
+    }
+
+    const dailyTasks: string[] = [];
+    
+    // Alternate primary routine every other active day
+    dailyTasks.push(primary[dayOffset % primary.length] || primary[0]);
+    
+    // Add 1 supporting routine in week 1-2, 2 in week 3-4
+    const supportCount = dayOffset >= 14 ? 2 : 1;
+    for (let i = 0; i < supportCount; i++) {
+        // rotate through supporting list
+        const suppItem = supporting[(dayOffset + i) % supporting.length];
+        if (suppItem && !dailyTasks.includes(suppItem)) {
+            dailyTasks.push(suppItem);
+        }
+    }
+
+    schedule.set(dateStr, dailyTasks);
+  }
+
+  // Mark older active plans as replaced
+  await Plan.updateMany({ userId, status: 'active' }, { $set: { status: 'replaced' } });
+
   const plan = await Plan.create({
     userId,
     scanId,
+    status: 'active',
     startDate,
     endDate,
-    dailyRoutines,
+    durationDays: 28,
+    schedule,
     bonusRoutines: bonus,
   });
 
   return plan;
 };
 
-/**
- * Get the current active plan for a user
- */
-export const getCurrentPlan = async (
-  userId: string,
-): Promise<typeof Plan.prototype | null> => {
+export const getCurrentPlan = async (userId: string): Promise<typeof Plan.prototype | null> => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Find plan where today is between startDate and endDate
-  const plan = await Plan.findOne({
+  return Plan.findOne({
     userId,
+    status: 'active',
     startDate: { $lte: today },
     endDate: { $gte: today },
   }).sort({ startDate: -1 });
-
-  return plan;
-};
-
-/**
- * Update an existing plan with new routines based on a new scan.
- * Preserves completion status for completed routines.
- */
-export const updatePlanFromScan = async (
-  userId: string,
-  planId: mongoose.Types.ObjectId,
-  scanId: mongoose.Types.ObjectId,
-): Promise<typeof Plan.prototype> => {
-  // Fetch the existing plan
-  const existingPlan = await Plan.findOne({ _id: planId, userId });
-  if (!existingPlan) {
-    throw new Error('Plan not found');
-  }
-
-  // Fetch the new scan
-  const scan = await Scan.findById(scanId);
-  if (!scan) {
-    throw new Error('Scan not found');
-  }
-
-  if (scan.userId.toString() !== userId.toString()) {
-    throw new Error('Unauthorized');
-  }
-
-  // Get new routines based on updated scores
-  const { daily, bonus } = selectWeightedRoutines(scan.scores);
-
-  // Build a map of completed routines by date string
-  const completedByDate = new Map<string, boolean>();
-  for (const dr of existingPlan.dailyRoutines) {
-    if (dr.completed) {
-      const dateStr = new Date(dr.date).toDateString();
-      completedByDate.set(dateStr, true);
-    }
-  }
-
-  // Update daily routines, preserving completion status by date
-  const updatedRoutines: IDailyRoutine[] = daily.map((routineId, index) => {
-    const routineDate = new Date(existingPlan.startDate);
-    routineDate.setDate(routineDate.getDate() + index);
-    const dateStr = routineDate.toDateString();
-
-    return {
-      date: routineDate,
-      routineId,
-      completed: completedByDate.has(dateStr),
-      completedAt: completedByDate.has(dateStr) ? new Date() : undefined,
-    };
-  });
-
-  // Update the plan
-  existingPlan.scanId = scanId;
-  existingPlan.dailyRoutines = updatedRoutines;
-  existingPlan.bonusRoutines = bonus;
-  await existingPlan.save();
-
-  return existingPlan;
 };

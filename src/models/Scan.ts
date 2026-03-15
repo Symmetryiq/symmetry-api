@@ -1,17 +1,11 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { type Scores } from '../types';
 
-type Landmark = {
-  x: number;
-  y: number;
-  z: number;
-};
-
 export interface IScan extends Document {
   userId: string;
-  landmarks: Landmark[];
   scores: Scores;
   scanDate: Date;
+  keyRatios?: Record<string, number>; // Compact summary of key facial ratios instead of 468 landmarks
   createdAt: Date;
 }
 
@@ -21,16 +15,6 @@ const ScanSchema: Schema = new Schema(
       type: String,
       required: true,
       index: true,
-    },
-    landmarks: {
-      type: [
-        {
-          x: { type: Number, required: true },
-          y: { type: Number, required: true },
-          z: { type: Number, required: true },
-        },
-      ],
-      required: true,
     },
     scores: {
       overallSymmetry: { type: Number, required: true },
@@ -43,6 +27,11 @@ const ScanSchema: Schema = new Schema(
       jawlineSymmetry: { type: Number, required: true },
       cheekboneBalance: { type: Number, required: true },
       eyebrowSymmetry: { type: Number, required: true },
+    },
+    keyRatios: {
+      type: Map,
+      of: Number,
+      required: false,
     },
     scanDate: {
       type: Date,

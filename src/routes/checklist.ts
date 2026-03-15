@@ -1,61 +1,60 @@
 import { getAuth, requireAuth } from '@clerk/express';
 import express from 'express';
+import { z } from 'zod';
 import { Checklist } from '../models/Checklist';
-import { CHECKLIST_TASKS } from '../utils/constants';
+import { asyncHandler } from '../middleware/async-handler';
+import { validate } from '../middleware/validate';
 
 const router = express.Router();
 
-// POST /api/checklist - Create or update checklist for a date
-router.post('/', requireAuth(), async (req, res) => {
-  try {
-    const { userId } = getAuth(req);
-    const { date, tasks } = req.body;
+const checklistSchema = z.object({
+  body: z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    completedTaskIds: z.array(z.string()),
+  }),
+});
 
-    if (!date || !tasks) {
-      return res.status(400).json({ error: 'Missing date or tasks' });
-    }
+// POST /api/checklist - Create or update checklist tasks for a date
+router.post(
+  '/',
+  requireAuth(),
+  validate(checklistSchema),
+  asyncHandler(async (req, res) => {
+    const { userId } = getAuth(req);
+    const { date, completedTaskIds } = req.body;
 
     const checklist = await Checklist.findOneAndUpdate(
       { userId, date },
-      { tasks },
-      { upsert: true, new: true },
+      { completedTaskIds },
+      { upsert: true, new: true }
     );
 
     res.json({
+      success: true,
       message: 'Checklist saved successfully',
       checklist,
     });
-  } catch (error: any) {
-    console.error('Error saving checklist:', error);
-    res.status(500).json({ error: 'Failed to save checklist' });
-  }
-});
+  })
+);
 
-// GET /api/checklist/:date - Get checklist for a specific date
-router.get('/:date', requireAuth(), async (req, res) => {
-  try {
+// GET /api/checklist/:date - Get completed tasks for a specific date
+router.get(
+  '/:date',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
     const { userId } = getAuth(req);
     const { date } = req.params;
 
-    let checklist = await Checklist.findOne({ userId, date });
+    const checklist = await Checklist.findOne({ userId, date });
 
-    if (!checklist) {
-      return res.json({
-        checklist: {
-          date,
-          tasks: CHECKLIST_TASKS.map((task) => ({
-            ...task,
-            completed: false,
-          })),
-        },
-      });
-    }
-
-    res.json({ checklist });
-  } catch (error: any) {
-    console.error('Error fetching checklist:', error);
-    res.status(500).json({ error: 'Failed to fetch checklist' });
-  }
-});
+    res.json({
+      success: true,
+      checklist: {
+        date,
+        completedTaskIds: checklist?.completedTaskIds || [],
+      },
+    });
+  })
+);
 
 export default router;

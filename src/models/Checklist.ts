@@ -1,24 +1,12 @@
 import { Document, model, Schema } from 'mongoose';
 
-export interface ITask {
-  title: string;
-  description: string;
-  completed: boolean;
-}
-
 export interface IChecklist extends Document {
-  userId: String;
-  date: string;
-  tasks: ITask[];
+  userId: string;
+  date: string; // YYYY-MM-DD format
+  completedTaskIds: string[];
   createdAt: Date;
   updatedAt: Date;
 }
-
-const TaskSchema = new Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  completed: { type: Boolean, default: false },
-});
 
 const ChecklistSchema: Schema = new Schema(
   {
@@ -31,7 +19,10 @@ const ChecklistSchema: Schema = new Schema(
       type: String,
       required: true,
     },
-    tasks: [TaskSchema],
+    completedTaskIds: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
